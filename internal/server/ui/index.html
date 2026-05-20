@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Salience — LLM brand visibility</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<aside class="nav">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2">
+      <path d="M12 2 L4 6 L4 12 C4 17 8 21 12 22 C16 21 20 17 20 12 L20 6 Z"/>
+      <circle cx="12" cy="11" r="2.5"/>
+    </svg>
+    <span>Salience</span>
+  </div>
+
+  <!-- project switcher -->
+  <div class="project-picker" id="projectPicker">
+    <button class="project-trigger" id="projectTrigger" type="button">
+      <span class="project-name" id="projectName">No project</span>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+    <div class="project-menu hidden" id="projectMenu">
+      <div class="project-menu-items" id="projectMenuItems"></div>
+      <button class="project-menu-action" id="newProjectBtn" type="button">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        New project
+      </button>
+    </div>
+  </div>
+
+  <nav class="primary">
+    <a class="tab-link active" data-view="dashboard">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>
+        <rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>
+      </svg>
+      Dashboard
+    </a>
+    <a class="tab-link" data-view="mentions">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 11.5 a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+      Mentions
+    </a>
+    <a class="tab-link" data-view="sources">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/>
+        <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>
+      </svg>
+      Sources
+    </a>
+    <a class="tab-link" data-view="playbook">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+      </svg>
+      Playbook
+    </a>
+    <a class="tab-link" data-view="trend">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 17 9 11 13 15 21 7"/>
+        <polyline points="14 7 21 7 21 14"/>
+      </svg>
+      Trend
+    </a>
+    <a class="tab-link" data-view="settings">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </a>
+  </nav>
+
+  <!-- big call-to-action: run a benchmark -->
+  <div class="run-now" id="runNowWrap" style="margin-top:10px">
+    <button class="btn-primary" id="runNowBtn" type="button" disabled>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      Run benchmark
+    </button>
+  </div>
+
+  <div class="runs-block">
+    <div class="section-label">Recent runs</div>
+    <ol id="runsList"></ol>
+  </div>
+
+  <div class="nav-footer">
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme (t)">
+      <span class="flex-row">
+        <svg id="themeIcon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"></svg>
+        <span id="themeLabel">Theme</span>
+      </span>
+      <span class="switch"><kbd style="font-size:10px">t</kbd></span>
+    </button>
+    <div class="live-card" id="liveCard">
+      <span class="dot"></span>
+      <span id="liveStatus">connecting…</span>
+    </div>
+  </div>
+</aside>
+
+<main id="content">
+  <div class="loading">Loading…</div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- modal scaffolding (single host, content swapped per use) -->
+<div class="modal-backdrop hidden" id="modalBackdrop">
+  <div class="modal" id="modalBox">
+    <div class="modal-head">
+      <h3 id="modalTitle">Modal</h3>
+      <button class="modal-close" id="modalClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

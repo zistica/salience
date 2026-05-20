@@ -1,0 +1,113 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build · ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: darwin, arch: arm64 }
+          - { os: darwin, arch: amd64 }
+          - { os: linux,  arch: amd64 }
+          - { os: linux,  arch: arm64 }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Build
+        env:
+          GOOS:   ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X 'main.buildVersion=${{ github.ref_name }}'" \
+            -o dist/salience-${{ matrix.os }}-${{ matrix.arch }} .
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: salience-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/salience-${{ matrix.os }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum salience-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            dist/salience-*
+            dist/SHA256SUMS
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## Installation
+
+            Pick the binary for your platform and drop it on your `$PATH`:
+
+            | Platform | Binary |
+            |---|---|
+            | macOS · Apple Silicon (M1/M2/M3/M4) | [`salience-darwin-arm64`](https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/salience-darwin-arm64) |
+            | macOS · Intel                       | [`salience-darwin-amd64`](https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/salience-darwin-amd64) |
+            | Linux · x86_64                      | [`salience-linux-amd64`](https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/salience-linux-amd64) |
+            | Linux · ARM64                       | [`salience-linux-arm64`](https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/salience-linux-arm64) |
+
+            ```bash
+            # macOS Apple Silicon example
+            curl -L -o salience https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/salience-darwin-arm64
+            chmod +x salience
+            ./salience version
+            ```
+
+            Or build from source:
+
+            ```bash
+            go install github.com/zistica/salience@${{ github.ref_name }}
+            ```
+
+            ## Verify
+
+            [`SHA256SUMS`](https://github.com/zistica/salience/releases/download/${{ github.ref_name }}/SHA256SUMS) contains checksums for each binary.
+
+            ## What's in this release
+
+            See the auto-generated change log below, and the project [CHANGELOG.md](https://github.com/zistica/salience/blob/main/CHANGELOG.md) for the full history.
+
+            ---

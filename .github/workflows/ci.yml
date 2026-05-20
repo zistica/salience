@@ -11,15 +11,15 @@ jobs:
     name: build · vet · test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
 
       - name: Cache modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/pkg/mod
@@ -43,8 +43,8 @@ jobs:
           - { os: linux,   arch: amd64 }
           - { os: linux,   arch: arm64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
       - run: GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o /tmp/salience-${{ matrix.os }}-${{ matrix.arch }} .

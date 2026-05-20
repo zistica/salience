@@ -33,11 +33,33 @@ type Data struct {
 	Finished      string
 	Status        string
 	UserBrand     string
-	Competitors   []string
-	Cells         []Cell // one per (prompt, provider) combination
-	Totals        BrandTotals
-	TotalSamples  int
-	TotalFailures int
+	// Competitors is the flat list of every competitor name, kept for
+	// backward compatibility with renderers that don't filter by region.
+	Competitors []string
+	// CompetitorBrands carries the full Brand structs (with Regions). New
+	// renderers use this to filter competitor columns per region.
+	CompetitorBrands []config.Brand
+	Cells            []Cell // one per (prompt, provider, region) combination
+	Totals           BrandTotals
+	TotalSamples     int
+	TotalFailures    int
+}
+
+// CompetitorsForRegion returns the names of competitors that apply to the
+// given region code. Empty Regions on a Brand means "applies everywhere".
+func (d Data) CompetitorsForRegion(code string) []string {
+	var out []string
+	for _, b := range d.CompetitorBrands {
+		if b.AppliesTo(code) {
+			out = append(out, b.Name)
+		}
+	}
+	// Fallback: if CompetitorBrands wasn't populated (older callers),
+	// return the flat list.
+	if len(d.CompetitorBrands) == 0 {
+		return d.Competitors
+	}
+	return out
 }
 
 // Cell is the report's atom: one (prompt, provider, model, region)
@@ -73,13 +95,36 @@ type BrandTotals struct {
 // Build crunches the raw samples into the report data structure.
 // userBrand is the canonical name of the user's brand; competitors is the
 // ordered list of competitor canonical names.
+//
+// Build also accepts an optional full competitor brand list via
+// BuildWithBrands when callers want per-region competitor filtering in
+// the report. The flat-name signature here preserves backward compat for
+// older callers; it's equivalent to passing brands where every brand has
+// Regions == nil ("applies everywhere").
 func Build(runID int64, runMeta *store.Run, samples []store.SampleRow, userBrand string, competitors []string) Data {
+	brands := make([]config.Brand, 0, len(competitors))
+	for _, c := range competitors {
+		brands = append(brands, config.Brand{Name: c})
+	}
+	return BuildWithBrands(runID, runMeta, samples, userBrand, brands)
+}
+
+// BuildWithBrands is the region-aware variant. competitorBrands carries
+// each competitor's Regions list so the renderer can filter columns per
+// region — e.g. Tsubaki only shows in Japan tables, Mamaearth only in
+// India tables, Dove (no regions = global) shows everywhere.
+func BuildWithBrands(runID int64, runMeta *store.Run, samples []store.SampleRow, userBrand string, competitorBrands []config.Brand) Data {
+	competitors := make([]string, 0, len(competitorBrands))
+	for _, b := range competitorBrands {
+		competitors = append(competitors, b.Name)
+	}
 	d := Data{
-		RunID:       runID,
-		UserBrand:   userBrand,
-		Competitors: append([]string(nil), competitors...),
-		Status:      runMeta.Status,
-		Started:     runMeta.StartedAt.Format("2006-01-02 15:04:05 MST"),
+		RunID:            runID,
+		UserBrand:        userBrand,
+		Competitors:      competitors,
+		CompetitorBrands: competitorBrands,
+		Status:           runMeta.Status,
+		Started:          runMeta.StartedAt.Format("2006-01-02 15:04:05 MST"),
 	}
 	if runMeta.FinishedAt != nil {
 		d.Finished = runMeta.FinishedAt.Format("2006-01-02 15:04:05 MST")
@@ -280,22 +325,100 @@ func renderMarkdown(w io.Writer, d Data) error {
 
 	losing, winning := splitCells(d.Cells)
 
-	fmt.Fprintf(&b, "## Prompts where you are losing\n\n")
-	if len(losing) == 0 {
-		fmt.Fprintf(&b, "_None._\n\n")
-	} else {
-		writeCellTableMD(&b, losing, d.UserBrand, d.Competitors)
-	}
+	// Multi-region runs group cells by region so each section uses only
+	// the competitors that actually apply to that region. (Tracking
+	// Tsubaki as a "competitor" in India is noise; it isn't sold there.)
+	regionCodes := distinctRegions(d.Cells)
+	if len(regionCodes) > 1 {
+		for _, region := range regionCodes {
+			regionLabel := region
+			fmt.Fprintf(&b, "## Region: %s\n\n", regionLabel)
 
-	fmt.Fprintf(&b, "## Prompts where you are winning or tied\n\n")
-	if len(winning) == 0 {
-		fmt.Fprintf(&b, "_None._\n\n")
+			regionComps := d.CompetitorsForRegion(region)
+			regionLosing, regionWinning := splitCellsForRegion(losing, winning, region)
+
+			fmt.Fprintf(&b, "### Where you are losing in %s\n\n", regionLabel)
+			if len(regionLosing) == 0 {
+				fmt.Fprintf(&b, "_None._\n\n")
+			} else {
+				writeCellTableMD(&b, regionLosing, d.UserBrand, regionComps)
+			}
+
+			fmt.Fprintf(&b, "### Where you are winning or tied in %s\n\n", regionLabel)
+			if len(regionWinning) == 0 {
+				fmt.Fprintf(&b, "_None._\n\n")
+			} else {
+				writeCellTableMD(&b, regionWinning, d.UserBrand, regionComps)
+			}
+		}
 	} else {
-		writeCellTableMD(&b, winning, d.UserBrand, d.Competitors)
+		// Single-region runs: keep the v0.1–v0.3 layout.
+		fmt.Fprintf(&b, "## Prompts where you are losing\n\n")
+		if len(losing) == 0 {
+			fmt.Fprintf(&b, "_None._\n\n")
+		} else {
+			writeCellTableMD(&b, losing, d.UserBrand, d.Competitors)
+		}
+
+		fmt.Fprintf(&b, "## Prompts where you are winning or tied\n\n")
+		if len(winning) == 0 {
+			fmt.Fprintf(&b, "_None._\n\n")
+		} else {
+			writeCellTableMD(&b, winning, d.UserBrand, d.Competitors)
+		}
 	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// distinctRegions returns the unique region codes seen across cells, in
+// stable order ("global" first if present, then alphabetical).
+func distinctRegions(cells []Cell) []string {
+	seen := map[string]bool{}
+	for _, c := range cells {
+		r := c.Region
+		if r == "" {
+			r = "global"
+		}
+		seen[r] = true
+	}
+	out := make([]string, 0, len(seen))
+	if seen["global"] {
+		out = append(out, "global")
+	}
+	rest := make([]string, 0, len(seen))
+	for r := range seen {
+		if r != "global" {
+			rest = append(rest, r)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// splitCellsForRegion partitions losing/winning cell lists by region.
+func splitCellsForRegion(losing, winning []Cell, region string) ([]Cell, []Cell) {
+	var l, w []Cell
+	for _, c := range losing {
+		r := c.Region
+		if r == "" {
+			r = "global"
+		}
+		if r == region {
+			l = append(l, c)
+		}
+	}
+	for _, c := range winning {
+		r := c.Region
+		if r == "" {
+			r = "global"
+		}
+		if r == region {
+			w = append(w, c)
+		}
+	}
+	return l, w
 }
 
 func writeCellTableMD(b *strings.Builder, cells []Cell, user string, comps []string) {
@@ -448,7 +571,8 @@ func truncate(s string, n int) string {
 
 // LoadCompetitorsFromConfigJSON extracts competitor canonical names from the
 // stored config_json blob; useful when the config file is gone but the run
-// remains in the database.
+// remains in the database. Returns names only — for the region-aware full
+// brand structs use LoadBrandsFromConfigJSON.
 func LoadCompetitorsFromConfigJSON(ctx context.Context, cfgJSON string) (userBrand string, competitors []string, err error) {
 	var c config.Config
 	if e := json.Unmarshal([]byte(cfgJSON), &c); e != nil {
@@ -459,4 +583,15 @@ func LoadCompetitorsFromConfigJSON(ctx context.Context, cfgJSON string) (userBra
 		competitors = append(competitors, comp.Name)
 	}
 	return userBrand, competitors, nil
+}
+
+// LoadBrandsFromConfigJSON is the region-aware variant: returns the full
+// competitor Brand structs (with Regions populated) so callers can do
+// per-region filtering in the report.
+func LoadBrandsFromConfigJSON(ctx context.Context, cfgJSON string) (userBrand string, competitors []config.Brand, err error) {
+	var c config.Config
+	if e := json.Unmarshal([]byte(cfgJSON), &c); e != nil {
+		return "", nil, e
+	}
+	return c.Brand.Name, c.Competitors, nil
 }

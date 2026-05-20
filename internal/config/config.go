@@ -11,9 +11,32 @@ import (
 
 // Brand represents the user's brand or a competitor brand.
 // Aliases may include alternate spellings, abbreviations, or domain names.
+//
+// Regions narrows the brand to a subset of the project's configured
+// regions. An empty / missing Regions list means "applies everywhere" —
+// preserves v0.1/v0.2/v0.3 single-list behavior. A list like
+// ["jp", "kr"] means this brand should only appear as a tracked
+// competitor in Japan and South Korea reports. Tsubaki, for example,
+// has no presence in India and should not pad the India report with a
+// zero-rate column.
 type Brand struct {
 	Name    string   `json:"name"`
 	Aliases []string `json:"aliases,omitempty"`
+	Regions []string `json:"regions,omitempty"`
+}
+
+// AppliesTo returns true if this brand should be tracked in region code.
+// Empty/nil Regions counts as "global → applies everywhere".
+func (b Brand) AppliesTo(code string) bool {
+	if len(b.Regions) == 0 {
+		return true
+	}
+	for _, r := range b.Regions {
+		if r == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Provider declares one LLM endpoint and the specific model to use against it.

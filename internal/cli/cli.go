@@ -169,7 +169,7 @@ func RunReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load run #%d: %w", id, err)
 	}
-	user, comps, err := report.LoadCompetitorsFromConfigJSON(ctx, meta.ConfigJSON)
+	user, brands, err := report.LoadBrandsFromConfigJSON(ctx, meta.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("decode embedded config: %w", err)
 	}
@@ -177,7 +177,7 @@ func RunReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	data := report.Build(id, meta, samples, user, comps)
+	data := report.BuildWithBrands(id, meta, samples, user, brands)
 
 	f := report.Format(strings.ToLower(*format))
 	switch f {

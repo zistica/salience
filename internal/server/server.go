@@ -227,7 +227,7 @@ func (s *Server) serveRunReport(w http.ResponseWriter, ctx context.Context, id i
 		httpErr(w, err)
 		return
 	}
-	user, comps, err := report.LoadCompetitorsFromConfigJSON(ctx, meta.ConfigJSON)
+	user, brands, err := report.LoadBrandsFromConfigJSON(ctx, meta.ConfigJSON)
 	if err != nil {
 		httpErr(w, err)
 		return
@@ -237,7 +237,7 @@ func (s *Server) serveRunReport(w http.ResponseWriter, ctx context.Context, id i
 		httpErr(w, err)
 		return
 	}
-	data := report.Build(id, meta, samples, user, comps)
+	data := report.BuildWithBrands(id, meta, samples, user, brands)
 	writeJSON(w, data)
 }
 

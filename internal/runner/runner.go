@@ -55,6 +55,13 @@ type Runner struct {
 // Otherwise a new run is started.
 func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 	r.Opts.Defaults()
+	// Per-worker goroutines write progress lines to r.Out concurrently.
+	// os.Stdout is safe under that pattern, but a *bytes.Buffer (used by
+	// tests and by the server's progressBuf wrapper) is not. Funnel every
+	// write through a mutex so any io.Writer the caller passes in is safe.
+	if r.Out != nil {
+		r.Out = &syncWriter{w: r.Out}
+	}
 	cfgJSON, _ := json.Marshal(r.Cfg)
 	var runID int64
 	var err error
@@ -268,4 +275,19 @@ func countUnique(ms []store.MentionRecord) int {
 		seen[m.Brand] = struct{}{}
 	}
 	return len(seen)
+}
+
+// syncWriter serializes Write calls from concurrent workers so the runner
+// stays safe regardless of whether r.Out is a *bytes.Buffer (tests),
+// a *strings.Builder, or os.Stdout. Wrapping is idempotent: rewrapping a
+// syncWriter just adds another layer of locking, which is harmless.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }

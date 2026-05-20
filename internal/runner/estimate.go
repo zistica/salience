@@ -40,11 +40,16 @@ func Estimate(cfg *config.Config, providers []provider.Provider) ([]PerProviderE
 		promptTokens += approxTokens(p)
 	}
 
+	regionsCount := len(cfg.Regions)
+	if regionsCount == 0 {
+		regionsCount = 1
+	}
+
 	var out []PerProviderEstimate
 	total := 0.0
 	for _, prov := range providers {
-		calls := len(cfg.Prompts) * cfg.SamplesPer
-		input := promptTokens * cfg.SamplesPer
+		calls := len(cfg.Prompts) * cfg.SamplesPer * regionsCount
+		input := promptTokens * cfg.SamplesPer * regionsCount
 		output := calls * avgCompletionTokens
 		rate := pricing.Lookup(prov.Model())
 		cost := pricing.Estimate(prov.Model(), input, output)

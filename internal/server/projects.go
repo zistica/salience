@@ -22,15 +22,16 @@ import (
 
 // ProjectIn is the JSON body for POST/PUT /api/projects.
 type ProjectIn struct {
-	Name        string             `json:"name"`
-	Brand       config.Brand       `json:"brand"`
-	Competitors []config.Brand     `json:"competitors"`
-	Prompts     []string           `json:"prompts"`
-	Providers   []config.Provider  `json:"providers"`
-	SamplesPer  int                `json:"samples_per_prompt"`
-	Concurrency int                `json:"concurrency_per_provider"`
-	MaxTokens   int                `json:"max_tokens"`
-	Notes       string             `json:"notes"`
+	Name        string            `json:"name"`
+	Brand       config.Brand      `json:"brand"`
+	Competitors []config.Brand    `json:"competitors"`
+	Prompts     []string          `json:"prompts"`
+	Providers   []config.Provider `json:"providers"`
+	Regions     []config.Region   `json:"regions"`
+	SamplesPer  int               `json:"samples_per_prompt"`
+	Concurrency int               `json:"concurrency_per_provider"`
+	MaxTokens   int               `json:"max_tokens"`
+	Notes       string            `json:"notes"`
 }
 
 // ProjectOut is the JSON body returned for GET /api/projects.
@@ -42,6 +43,7 @@ type ProjectOut struct {
 	Competitors            []config.Brand    `json:"competitors"`
 	Prompts                []string          `json:"prompts"`
 	Providers              []config.Provider `json:"providers"`
+	Regions                []config.Region   `json:"regions"`
 	SamplesPerPrompt       int               `json:"samples_per_prompt"`
 	ConcurrencyPerProvider int               `json:"concurrency_per_provider"`
 	MaxTokens              int               `json:"max_tokens"`
@@ -53,9 +55,9 @@ type ProjectOut struct {
 func projectToOut(p *store.Project) ProjectOut {
 	out := ProjectOut{
 		ID: p.ID, Name: p.Name, Slug: p.Slug,
-		SamplesPerPrompt: p.SamplesPerPrompt,
+		SamplesPerPrompt:       p.SamplesPerPrompt,
 		ConcurrencyPerProvider: p.ConcurrencyPerProvider,
-		MaxTokens: p.MaxTokens, Notes: p.Notes,
+		MaxTokens:              p.MaxTokens, Notes: p.Notes,
 		CreatedAt: p.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: p.UpdatedAt.Format(time.RFC3339),
 	}
@@ -63,6 +65,7 @@ func projectToOut(p *store.Project) ProjectOut {
 	_ = json.Unmarshal([]byte(p.CompetitorsJSON), &out.Competitors)
 	_ = json.Unmarshal([]byte(p.PromptsJSON), &out.Prompts)
 	_ = json.Unmarshal([]byte(p.ProvidersJSON), &out.Providers)
+	_ = json.Unmarshal([]byte(p.RegionsJSON), &out.Regions)
 	return out
 }
 
@@ -74,12 +77,14 @@ func inToProject(in ProjectIn) (store.Project, error) {
 	comps, _ := json.Marshal(in.Competitors)
 	prompts, _ := json.Marshal(in.Prompts)
 	provs, _ := json.Marshal(in.Providers)
+	regions, _ := json.Marshal(in.Regions)
 	return store.Project{
 		Name:                   in.Name,
 		BrandJSON:              string(brand),
 		CompetitorsJSON:        string(comps),
 		PromptsJSON:            string(prompts),
 		ProvidersJSON:          string(provs),
+		RegionsJSON:            string(regions),
 		SamplesPerPrompt:       in.SamplesPer,
 		ConcurrencyPerProvider: in.Concurrency,
 		MaxTokens:              in.MaxTokens,
@@ -256,9 +261,13 @@ func (s *Server) handleProjectEstimate(w http.ResponseWriter, ctx context.Contex
 	for _, p := range cfg.Prompts {
 		promptTokens += len(p)/4 + 1
 	}
+	regionsCount := len(cfg.Regions)
+	if regionsCount == 0 {
+		regionsCount = 1
+	}
 	for _, pc := range cfg.Providers {
-		calls := len(cfg.Prompts) * cfg.SamplesPer
-		in := promptTokens * cfg.SamplesPer
+		calls := len(cfg.Prompts) * cfg.SamplesPer * regionsCount
+		in := promptTokens * cfg.SamplesPer * regionsCount
 		out2 := calls * 350
 		cost := pricing.Estimate(pc.Model, in, out2)
 		out.Providers = append(out.Providers, providerEst{Name: pc.Name, Model: pc.Model, Calls: calls, Cost: cost})
@@ -589,17 +598,20 @@ func projectToConfig(p *store.Project) (*config.Config, error) {
 	var comps []config.Brand
 	var prompts []string
 	var provs []config.Provider
+	var regions []config.Region
 	if err := json.Unmarshal([]byte(p.BrandJSON), &brand); err != nil {
 		return nil, fmt.Errorf("brand JSON: %w", err)
 	}
 	_ = json.Unmarshal([]byte(p.CompetitorsJSON), &comps)
 	_ = json.Unmarshal([]byte(p.PromptsJSON), &prompts)
 	_ = json.Unmarshal([]byte(p.ProvidersJSON), &provs)
+	_ = json.Unmarshal([]byte(p.RegionsJSON), &regions)
 	cfg := &config.Config{
 		Brand:       brand,
 		Competitors: comps,
 		Prompts:     prompts,
 		Providers:   provs,
+		Regions:     regions,
 		SamplesPer:  p.SamplesPerPrompt,
 		Concurrency: p.ConcurrencyPerProvider,
 		MaxTokens:   p.MaxTokens,

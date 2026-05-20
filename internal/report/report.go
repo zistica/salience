@@ -40,12 +40,15 @@ type Data struct {
 	TotalFailures int
 }
 
-// Cell is the report's atom: one (prompt, provider, model) combination with
-// computed mention rates for every brand.
+// Cell is the report's atom: one (prompt, provider, model, region)
+// combination with computed mention rates for every brand. Region is the
+// short code from the project's configured regions list ("global" for
+// runs that don't use regions).
 type Cell struct {
 	Prompt       string
 	ProviderName string
 	Model        string
+	Region       string
 	Samples      int
 	Failures     int
 	// Rates is keyed by canonical brand name. Each value is in [0, 1].
@@ -86,6 +89,7 @@ func Build(runID int64, runMeta *store.Run, samples []store.SampleRow, userBrand
 		prompt   string
 		provider string
 		model    string
+		region   string
 	}
 	type bucket struct {
 		samples  int
@@ -100,7 +104,11 @@ func Build(runID int64, runMeta *store.Run, samples []store.SampleRow, userBrand
 	allBrands := append([]string{userBrand}, competitors...)
 
 	for _, s := range samples {
-		k := key{s.Prompt, s.ProviderName, s.Model}
+		region := s.Region
+		if region == "" {
+			region = "global"
+		}
+		k := key{s.Prompt, s.ProviderName, s.Model, region}
 		b := buckets[k]
 		if b == nil {
 			b = &bucket{hits: map[string]int{}}
@@ -130,6 +138,7 @@ func Build(runID int64, runMeta *store.Run, samples []store.SampleRow, userBrand
 			Prompt:           k.prompt,
 			ProviderName:     k.provider,
 			Model:            k.model,
+			Region:           k.region,
 			Samples:          b.samples,
 			Failures:         b.failures,
 			Rates:            map[string]float64{},
@@ -290,7 +299,20 @@ func renderMarkdown(w io.Writer, d Data) error {
 }
 
 func writeCellTableMD(b *strings.Builder, cells []Cell, user string, comps []string) {
-	header := []string{"Prompt", "Provider", "Model", "Samples", "You"}
+	// Only show the Region column when at least one cell carries a
+	// non-global region — otherwise the column is noise.
+	multiRegion := false
+	for _, c := range cells {
+		if c.Region != "" && c.Region != "global" {
+			multiRegion = true
+			break
+		}
+	}
+	header := []string{"Prompt", "Provider", "Model"}
+	if multiRegion {
+		header = append(header, "Region")
+	}
+	header = append(header, "Samples", "You")
 	for _, c := range comps {
 		header = append(header, c)
 	}
@@ -306,14 +328,16 @@ func writeCellTableMD(b *strings.Builder, cells []Cell, user string, comps []str
 		if c.Samples < LowSampleThreshold {
 			nLabel = fmt.Sprintf("%d⚠", c.Samples)
 		}
-		row := []string{
-			truncate(c.Prompt, 80),
-			c.ProviderName,
-			c.Model,
-			nLabel,
-			fmt.Sprintf("%s (CI %s–%s)", pct(c.Rates[user]),
-				pct(c.CILow[user]), pct(c.CIHigh[user])),
+		row := []string{truncate(c.Prompt, 80), c.ProviderName, c.Model}
+		if multiRegion {
+			region := c.Region
+			if region == "" {
+				region = "global"
+			}
+			row = append(row, region)
 		}
+		row = append(row, nLabel, fmt.Sprintf("%s (CI %s–%s)",
+			pct(c.Rates[user]), pct(c.CILow[user]), pct(c.CIHigh[user])))
 		for _, comp := range comps {
 			row = append(row, pct(c.Rates[comp]))
 		}

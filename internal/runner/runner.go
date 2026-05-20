@@ -82,7 +82,14 @@ func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 	}
 
 	brands := r.Cfg.AllBrands()
-	totalPlanned := len(r.Cfg.Prompts) * len(r.Providers) * r.Cfg.SamplesPer
+	// Regions: if the project didn't declare any, fall through to one
+	// implicit "global" region so the v0.1/v0.2 single-region behaviour is
+	// preserved exactly.
+	regions := r.Cfg.Regions
+	if len(regions) == 0 {
+		regions = []config.Region{{Code: "global", Label: "Global", Prefix: ""}}
+	}
+	totalPlanned := len(r.Cfg.Prompts) * len(r.Providers) * len(regions) * r.Cfg.SamplesPer
 
 	// Set up a cancellable context that also flips on a fatal auth error so the
 	// other workers stop quickly.
@@ -112,20 +119,29 @@ func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 	for _, p := range r.Providers {
 		p := p
 		jobs := make(chan job, 64)
-		// Producer for this provider's jobs.
+		// Producer for this provider's jobs. Each (prompt × region × sample)
+		// is its own job. The region's Prefix is applied to the prompt
+		// before send-time so the model is nudged toward locale-appropriate
+		// brand recommendations.
 		go func() {
 			for _, prompt := range r.Cfg.Prompts {
-				for i := 0; i < r.Cfg.SamplesPer; i++ {
-					key := store.EncodeKey(prompt, p.Name(), i)
-					if _, ok := completed[key]; ok {
-						atomic.AddInt64(&skipped, 1)
-						continue
+				for _, region := range regions {
+					sent := prompt
+					if pre := region.Prefix; pre != "" {
+						sent = pre + " " + prompt
 					}
-					select {
-					case <-runCtx.Done():
-						close(jobs)
-						return
-					case jobs <- job{prompt: prompt, sampleIdx: i}:
+					for i := 0; i < r.Cfg.SamplesPer; i++ {
+						key := store.EncodeKey(prompt, p.Name(), region.Code, i)
+						if _, ok := completed[key]; ok {
+							atomic.AddInt64(&skipped, 1)
+							continue
+						}
+						select {
+						case <-runCtx.Done():
+							close(jobs)
+							return
+						case jobs <- job{prompt: prompt, sent: sent, sampleIdx: i, region: region}:
+						}
 					}
 				}
 			}
@@ -141,18 +157,19 @@ func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 					if runCtx.Err() != nil {
 						return
 					}
-					resp, err := r.callWithRetry(runCtx, p, j.prompt)
+					resp, err := r.callWithRetry(runCtx, p, j.sent)
 					if errors.Is(err, provider.ErrAuth) {
 						setFatal(err)
 						return
 					}
 					rec := store.SampleRecord{
 						RunID:        runID,
-						Prompt:       j.prompt,
+						Prompt:       j.prompt, // store the ORIGINAL prompt, not the prefixed one
 						ProviderName: p.Name(),
 						ProviderKind: p.Kind(),
 						Model:        p.Model(),
 						SampleIdx:    j.sampleIdx,
+						Region:       j.region.Code,
 					}
 					var mentions []store.MentionRecord
 					if err != nil {
@@ -213,8 +230,10 @@ func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 }
 
 type job struct {
-	prompt    string
+	prompt    string // ORIGINAL prompt (used for storage + reporting)
+	sent      string // prompt actually sent to the provider (may include region prefix)
 	sampleIdx int
+	region    config.Region
 }
 
 // callWithRetry runs p.Call with exponential backoff for transient errors.

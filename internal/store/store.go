@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS samples (
 	provider_kind TEXT NOT NULL,
 	model TEXT NOT NULL,
 	sample_idx INTEGER NOT NULL,
+	region TEXT NOT NULL DEFAULT 'global',
 	created_at TEXT NOT NULL,
 	response_text TEXT NOT NULL,
 	sources_json TEXT NOT NULL,
@@ -85,7 +86,7 @@ CREATE TABLE IF NOT EXISTS samples (
 	output_tokens INTEGER NOT NULL DEFAULT 0,
 	cost_usd REAL NOT NULL DEFAULT 0,
 	error TEXT NOT NULL DEFAULT '',
-	UNIQUE(run_id, prompt, provider_name, sample_idx)
+	UNIQUE(run_id, prompt, provider_name, region, sample_idx)
 );
 
 CREATE TABLE IF NOT EXISTS mentions (
@@ -249,6 +250,9 @@ func (s *Store) migrate() error {
 		`ALTER TABLE mentions ADD COLUMN sentiment TEXT NOT NULL DEFAULT 'neutral'`,
 		// projects support
 		`ALTER TABLE runs ADD COLUMN project_id INTEGER`,
+		// region-aware bench (v0.3): existing samples become "global".
+		`ALTER TABLE samples ADD COLUMN region TEXT NOT NULL DEFAULT 'global'`,
+		`ALTER TABLE projects ADD COLUMN regions_json TEXT NOT NULL DEFAULT '[]'`,
 	} {
 		if _, err := s.db.Exec(alter); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
@@ -297,8 +301,9 @@ type SampleRecord struct {
 	ProviderKind string
 	Model        string
 	SampleIdx    int
+	Region       string // e.g. "global", "jp", "us"; defaults to "global"
 	ResponseText string
-	Sources      interface{} // serialized as JSON
+	Sources      any // serialized as JSON
 	InputTokens  int
 	OutputTokens int
 	CostUSD      float64
@@ -329,11 +334,15 @@ func (s *Store) SaveSample(ctx context.Context, sr SampleRecord, mentions []Ment
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	region := sr.Region
+	if region == "" {
+		region = "global"
+	}
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO samples(run_id, prompt, provider_name, provider_kind, model, sample_idx, created_at,
+		INSERT INTO samples(run_id, prompt, provider_name, provider_kind, model, sample_idx, region, created_at,
 			response_text, sources_json, input_tokens, output_tokens, cost_usd, error)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sr.RunID, sr.Prompt, sr.ProviderName, sr.ProviderKind, sr.Model, sr.SampleIdx,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sr.RunID, sr.Prompt, sr.ProviderName, sr.ProviderKind, sr.Model, sr.SampleIdx, region,
 		time.Now().UTC().Format(time.RFC3339Nano),
 		sr.ResponseText, string(srcJSON), sr.InputTokens, sr.OutputTokens, sr.CostUSD, sr.Error,
 	)
@@ -375,30 +384,35 @@ func isUnique(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE")
 }
 
-// CompletedKeys returns the set of (prompt, provider, sample_idx) tuples
-// already present for a run, as a map keyed by the encodeKey helper.
+// CompletedKeys returns the set of (prompt, provider, region, sample_idx)
+// tuples already present for a run, as a map keyed by EncodeKey.
 func (s *Store) CompletedKeys(ctx context.Context, runID int64) (map[string]struct{}, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT prompt, provider_name, sample_idx FROM samples WHERE run_id=? AND error=''`, runID)
+		`SELECT prompt, provider_name, COALESCE(region, 'global'), sample_idx FROM samples WHERE run_id=? AND error=''`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]struct{}{}
 	for rows.Next() {
-		var p, pn string
+		var p, pn, region string
 		var idx int
-		if err := rows.Scan(&p, &pn, &idx); err != nil {
+		if err := rows.Scan(&p, &pn, &region, &idx); err != nil {
 			return nil, err
 		}
-		out[EncodeKey(p, pn, idx)] = struct{}{}
+		out[EncodeKey(p, pn, region, idx)] = struct{}{}
 	}
 	return out, rows.Err()
 }
 
-// EncodeKey produces the deterministic key used by CompletedKeys.
-func EncodeKey(prompt, providerName string, sampleIdx int) string {
-	return fmt.Sprintf("%s\x1f%s\x1f%d", prompt, providerName, sampleIdx)
+// EncodeKey produces the deterministic key used by CompletedKeys. Region
+// is part of the key so the same (prompt, provider, sample) across two
+// different regions is not collapsed.
+func EncodeKey(prompt, providerName, region string, sampleIdx int) string {
+	if region == "" {
+		region = "global"
+	}
+	return fmt.Sprintf("%s\x1f%s\x1f%s\x1f%d", prompt, providerName, region, sampleIdx)
 }
 
 // LatestRunID returns the id of the most recent run or 0 when there are none.
@@ -456,6 +470,7 @@ type SampleRow struct {
 	ProviderKind string
 	Model        string
 	SampleIdx    int
+	Region       string
 	Error        string
 	CostUSD      float64
 	BrandsHit    []string // unique canonical brand names mentioned in this sample
@@ -685,8 +700,9 @@ func (s *Store) CountSamples(ctx context.Context, runID int64) (ok, errored int,
 // brands that hit it.
 func (s *Store) ListSamples(ctx context.Context, runID int64) ([]SampleRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.id, s.prompt, s.provider_name, s.provider_kind, s.model, s.sample_idx, s.error, s.cost_usd
-		FROM samples s WHERE s.run_id=? ORDER BY s.prompt, s.provider_name, s.sample_idx`, runID)
+		SELECT s.id, s.prompt, s.provider_name, s.provider_kind, s.model, s.sample_idx,
+		       COALESCE(s.region, 'global'), s.error, s.cost_usd
+		FROM samples s WHERE s.run_id=? ORDER BY s.prompt, s.provider_name, s.region, s.sample_idx`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +712,8 @@ func (s *Store) ListSamples(ctx context.Context, runID int64) ([]SampleRow, erro
 	byID := map[int64]int{}
 	for rows.Next() {
 		var r SampleRow
-		if err := rows.Scan(&r.ID, &r.Prompt, &r.ProviderName, &r.ProviderKind, &r.Model, &r.SampleIdx, &r.Error, &r.CostUSD); err != nil {
+		if err := rows.Scan(&r.ID, &r.Prompt, &r.ProviderName, &r.ProviderKind, &r.Model, &r.SampleIdx,
+			&r.Region, &r.Error, &r.CostUSD); err != nil {
 			return nil, err
 		}
 		byID[r.ID] = len(out)

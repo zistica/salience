@@ -30,10 +30,23 @@ type Config struct {
 	Competitors  []Brand    `json:"competitors"`
 	Prompts      []string   `json:"prompts"`
 	Providers    []Provider `json:"providers"`
+	// Regions is the list of locales each prompt should be asked from.
+	// An empty list collapses to a single implicit "global" region —
+	// preserving v0.1/v0.2 behavior.
+	Regions      []Region   `json:"regions,omitempty"`
 	SamplesPer   int        `json:"samples_per_prompt"`
 	Concurrency  int        `json:"concurrency_per_provider"`
 	MaxTokens    int        `json:"max_tokens,omitempty"`
 	Temperature  *float64   `json:"temperature,omitempty"`
+}
+
+// Region is one tracked locale that gets prepended to each prompt before
+// the call goes out. Carried inline on Config (rather than as a separate
+// internal/regions import) so the JSON schema stays self-contained.
+type Region struct {
+	Code   string `json:"code"`
+	Label  string `json:"label"`
+	Prefix string `json:"prefix"`
 }
 
 // Defaults supplies the numeric knob defaults the spec leaves up to the

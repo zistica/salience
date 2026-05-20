@@ -32,6 +32,12 @@ const StarterJSON = `{
       "model": "claude-3-5-sonnet-latest"
     }
   ],
+  "regions": [
+    { "code": "global", "label": "Global",         "prefix": "" },
+    { "code": "us",     "label": "United States",  "prefix": "Context: I am asking from the United States." },
+    { "code": "in",     "label": "India",          "prefix": "Context: I am asking from India." },
+    { "code": "jp",     "label": "Japan",          "prefix": "前提: 私は日本から尋ねています。" }
+  ],
   "samples_per_prompt": 5,
   "concurrency_per_provider": 3,
   "max_tokens": 512

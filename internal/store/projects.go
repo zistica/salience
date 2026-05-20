@@ -23,6 +23,7 @@ type Project struct {
 	CompetitorsJSON        string
 	PromptsJSON            string
 	ProvidersJSON          string
+	RegionsJSON            string // v0.3 — JSON array of Region {code,label,prefix}
 	SamplesPerPrompt       int
 	ConcurrencyPerProvider int
 	MaxTokens              int
@@ -47,6 +48,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project) (int64, error) {
 	p.CompetitorsJSON = orJSONArray(p.CompetitorsJSON)
 	p.PromptsJSON = orJSONArray(p.PromptsJSON)
 	p.ProvidersJSON = orJSONArray(p.ProvidersJSON)
+	p.RegionsJSON = orJSONArray(p.RegionsJSON)
 	if p.SamplesPerPrompt <= 0 {
 		p.SamplesPerPrompt = 5
 	}
@@ -59,11 +61,11 @@ func (s *Store) CreateProject(ctx context.Context, p Project) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO projects(name, slug, brand_json, competitors_json, prompts_json,
-			providers_json, samples_per_prompt, concurrency_per_provider, max_tokens,
+			providers_json, regions_json, samples_per_prompt, concurrency_per_provider, max_tokens,
 			notes, created_at, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.Slug, p.BrandJSON, p.CompetitorsJSON, p.PromptsJSON,
-		p.ProvidersJSON, p.SamplesPerPrompt, p.ConcurrencyPerProvider, p.MaxTokens,
+		p.ProvidersJSON, p.RegionsJSON, p.SamplesPerPrompt, p.ConcurrencyPerProvider, p.MaxTokens,
 		p.Notes, now, now)
 	if err != nil {
 		return 0, err
@@ -80,14 +82,15 @@ func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 		p.Slug = slugify(p.Name)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	p.RegionsJSON = orJSONArray(p.RegionsJSON)
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE projects
 		   SET name=?, slug=?, brand_json=?, competitors_json=?, prompts_json=?,
-		       providers_json=?, samples_per_prompt=?, concurrency_per_provider=?,
+		       providers_json=?, regions_json=?, samples_per_prompt=?, concurrency_per_provider=?,
 		       max_tokens=?, notes=?, updated_at=?
 		 WHERE id=?`,
 		p.Name, p.Slug, p.BrandJSON, p.CompetitorsJSON, p.PromptsJSON,
-		p.ProvidersJSON, p.SamplesPerPrompt, p.ConcurrencyPerProvider, p.MaxTokens,
+		p.ProvidersJSON, p.RegionsJSON, p.SamplesPerPrompt, p.ConcurrencyPerProvider, p.MaxTokens,
 		p.Notes, now, p.ID)
 	if err != nil {
 		return err
@@ -117,7 +120,7 @@ func (s *Store) DeleteProject(ctx context.Context, id int64) error {
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, slug, brand_json, competitors_json, prompts_json,
-		       providers_json, samples_per_prompt, concurrency_per_provider,
+		       providers_json, COALESCE(regions_json, '[]'), samples_per_prompt, concurrency_per_provider,
 		       max_tokens, notes, created_at, updated_at
 		FROM projects ORDER BY id DESC`)
 	if err != nil {
@@ -131,7 +134,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 func (s *Store) GetProject(ctx context.Context, id int64) (*Project, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, brand_json, competitors_json, prompts_json,
-		       providers_json, samples_per_prompt, concurrency_per_provider,
+		       providers_json, COALESCE(regions_json, '[]'), samples_per_prompt, concurrency_per_provider,
 		       max_tokens, notes, created_at, updated_at
 		FROM projects WHERE id=?`, id)
 	return scanProjectRow(row)
@@ -146,7 +149,7 @@ func (s *Store) GetProjectBySlugOrName(ctx context.Context, key string) (*Projec
 	}
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, brand_json, competitors_json, prompts_json,
-		       providers_json, samples_per_prompt, concurrency_per_provider,
+		       providers_json, COALESCE(regions_json, '[]'), samples_per_prompt, concurrency_per_provider,
 		       max_tokens, notes, created_at, updated_at
 		FROM projects WHERE slug=? OR name=? LIMIT 1`, key, key)
 	return scanProjectRow(row)
@@ -229,6 +232,7 @@ func scanProjectRow(row rowScanner) (*Project, error) {
 	var created, updated string
 	if err := row.Scan(&p.ID, &p.Name, &p.Slug,
 		&p.BrandJSON, &p.CompetitorsJSON, &p.PromptsJSON, &p.ProvidersJSON,
+		&p.RegionsJSON,
 		&p.SamplesPerPrompt, &p.ConcurrencyPerProvider, &p.MaxTokens,
 		&p.Notes, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

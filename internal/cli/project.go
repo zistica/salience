@@ -344,19 +344,20 @@ func projectDelete(ctx context.Context, args []string) error {
 // ---------- shared JSON shape for import/export ----------
 
 type projectJSON struct {
-	ID                     int64               `json:"id,omitempty"`
-	Name                   string              `json:"name"`
-	Slug                   string              `json:"slug,omitempty"`
-	Brand                  config.Brand        `json:"brand"`
-	Competitors            []config.Brand      `json:"competitors"`
-	Prompts                []string            `json:"prompts"`
-	Providers              []config.Provider   `json:"providers"`
-	SamplesPerPrompt       int                 `json:"samples_per_prompt"`
-	ConcurrencyPerProvider int                 `json:"concurrency_per_provider"`
-	MaxTokens              int                 `json:"max_tokens"`
-	Notes                  string              `json:"notes,omitempty"`
-	CreatedAt              string              `json:"created_at,omitempty"`
-	UpdatedAt              string              `json:"updated_at,omitempty"`
+	ID                     int64             `json:"id,omitempty"`
+	Name                   string            `json:"name"`
+	Slug                   string            `json:"slug,omitempty"`
+	Brand                  config.Brand      `json:"brand"`
+	Competitors            []config.Brand    `json:"competitors"`
+	Prompts                []string          `json:"prompts"`
+	Providers              []config.Provider `json:"providers"`
+	Regions                []config.Region   `json:"regions,omitempty"`
+	SamplesPerPrompt       int               `json:"samples_per_prompt"`
+	ConcurrencyPerProvider int               `json:"concurrency_per_provider"`
+	MaxTokens              int               `json:"max_tokens"`
+	Notes                  string            `json:"notes,omitempty"`
+	CreatedAt              string            `json:"created_at,omitempty"`
+	UpdatedAt              string            `json:"updated_at,omitempty"`
 }
 
 func writeProjectJSON(w io.Writer, p *store.Project) error {
@@ -364,13 +365,16 @@ func writeProjectJSON(w io.Writer, p *store.Project) error {
 	var comps []config.Brand
 	var prompts []string
 	var provs []config.Provider
+	var regions []config.Region
 	_ = json.Unmarshal([]byte(p.BrandJSON), &brand)
 	_ = json.Unmarshal([]byte(p.CompetitorsJSON), &comps)
 	_ = json.Unmarshal([]byte(p.PromptsJSON), &prompts)
 	_ = json.Unmarshal([]byte(p.ProvidersJSON), &provs)
+	_ = json.Unmarshal([]byte(p.RegionsJSON), &regions)
 	pj := projectJSON{
 		ID: p.ID, Name: p.Name, Slug: p.Slug,
 		Brand: brand, Competitors: comps, Prompts: prompts, Providers: provs,
+		Regions:                regions,
 		SamplesPerPrompt:       p.SamplesPerPrompt,
 		ConcurrencyPerProvider: p.ConcurrencyPerProvider,
 		MaxTokens:              p.MaxTokens,
@@ -388,6 +392,7 @@ func projectFromJSON(pj projectJSON) store.Project {
 	comps, _ := json.Marshal(pj.Competitors)
 	prompts, _ := json.Marshal(pj.Prompts)
 	provs, _ := json.Marshal(pj.Providers)
+	regions, _ := json.Marshal(pj.Regions)
 	return store.Project{
 		Name:                   pj.Name,
 		Slug:                   pj.Slug,
@@ -395,6 +400,7 @@ func projectFromJSON(pj projectJSON) store.Project {
 		CompetitorsJSON:        string(comps),
 		PromptsJSON:            string(prompts),
 		ProvidersJSON:          string(provs),
+		RegionsJSON:            string(regions),
 		SamplesPerPrompt:       pj.SamplesPerPrompt,
 		ConcurrencyPerProvider: pj.ConcurrencyPerProvider,
 		MaxTokens:              pj.MaxTokens,

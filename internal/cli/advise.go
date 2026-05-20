@@ -170,13 +170,20 @@ func RunAdvise(ctx context.Context, args []string) error {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// Cross-model triangulation: every provider answers about the
+			// recommendation regardless of which provider made it. That way
+			// Anthropic answers "why is OpenAI recommending Contoso?" with
+			// its own outside perspective, which tends to be less
+			// self-confirming than asking the same model to justify its
+			// own pick.
 			text := fmt.Sprintf(
 				"I represent %q, a competitor in this market. For the question %q, "+
-					"you currently appear to recommend %q. Be candid: what specific, verifiable things "+
-					"would %q need to demonstrate publicly (content, references, partnerships, product evidence, "+
-					"third-party reviews, community presence, anything) so a future answer to the same question "+
-					"would recommend %q over %q? Give a numbered list of concrete, ranked actions. Skip generic "+
-					"advice; be specific to this question.",
+					"the broader landscape of AI assistants currently leans toward recommending %q. "+
+					"Treat that as a given and answer with your own perspective (you do not need to defend the "+
+					"recommendation). Be candid: what specific, verifiable things would %q need to demonstrate "+
+					"publicly (content, references, partnerships, product evidence, third-party reviews, "+
+					"community presence, anything) for a future answer to recommend %q over %q? "+
+					"Give a numbered list of concrete, ranked actions. Skip generic advice; be specific to this question.",
 				cfg.Brand.Name, a.prompt, a.winner, cfg.Brand.Name, cfg.Brand.Name, a.winner)
 			temp := 0.5
 			resp, err := a.client.Call(ctx, text, 800, &temp)

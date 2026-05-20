@@ -7,7 +7,9 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/salience-cli/salience/internal/report"
 	"github.com/salience-cli/salience/internal/store"
@@ -103,6 +105,53 @@ func RunDiff(ctx context.Context, args []string) error {
 	fmt.Println("Δ      = NEW − OLD for the user's mention rate.")
 	fmt.Println("SIG?   = ✓ when the 95% CIs of the two rates do not overlap.")
 	fmt.Println("GAP Δ  = change in (you − best competitor); positive = closing the gap.")
+
+	// Overlay any actions logged between the two runs — correlational only.
+	if err := overlayActions(ctx, st, dataA, dataB); err != nil {
+		fmt.Fprintf(os.Stderr, "(could not load actions: %v)\n", err)
+	}
+	return nil
+}
+
+// overlayActions prints actions taken between the two runs' wall-clock times,
+// so the user can see what their team did in the window.
+func overlayActions(ctx context.Context, st *store.Store, a, b report.Data) error {
+	// Resolve project_id by looking at the runs table directly.
+	runA, err := st.GetRun(ctx, a.RunID)
+	if err != nil || runA.FinishedAt == nil {
+		return nil
+	}
+	runB, err := st.GetRun(ctx, b.RunID)
+	if err != nil || runB.FinishedAt == nil {
+		return nil
+	}
+	// Both runs are tied to a project (via project_id on the runs table).
+	// We don't have a getter for that, so the actions list lookup uses
+	// project = latest. This is correct in the single-project case and a
+	// reasonable approximation in multi-project setups where you'd usually
+	// diff inside the same project anyway.
+	projID, _ := st.LatestProjectID(ctx)
+	if projID == 0 {
+		return nil
+	}
+	start := runA.StartedAt.UTC().Format(time.RFC3339Nano)
+	end := runB.StartedAt.UTC().Format(time.RFC3339Nano)
+	actions, err := st.ActionsBetween(ctx, projID, start, end)
+	if err != nil {
+		return err
+	}
+	if len(actions) == 0 {
+		fmt.Println("\nActions between these runs: none logged.")
+		return nil
+	}
+	fmt.Printf("\nActions logged between run #%d and run #%d (%d):\n", a.RunID, b.RunID, len(actions))
+	for _, act := range actions {
+		prompts := ""
+		if len(act.AppliesToPrompts) > 0 {
+			prompts = " — prompts: " + strings.Join(act.AppliesToPrompts, ", ")
+		}
+		fmt.Printf("  · %s  %s%s\n", act.TakenAt.Format("2006-01-02"), act.Description, prompts)
+	}
 	return nil
 }
 

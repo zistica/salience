@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/salience-cli/salience/internal/config"
@@ -73,6 +74,7 @@ func RunSources(ctx context.Context, args []string) error {
 	fmt.Printf("Sources for run #%d — brand %q\n\n", id, cfg.Brand.Name)
 	if *gapOnly {
 		printGap(rep, *limit)
+		printListicleGap(ctx, st, rep, cfg.Brand.Name, competitors, *limit)
 		return nil
 	}
 	printDomains(rep, *limit)
@@ -81,8 +83,44 @@ func RunSources(ctx context.Context, args []string) error {
 	fmt.Println()
 	printGap(rep, *limit)
 	fmt.Println()
+	printListicleGap(ctx, st, rep, cfg.Brand.Name, competitors, *limit)
+	fmt.Println()
 	printTopURLs(rep, *limit)
 	return nil
+}
+
+// printListicleGap surfaces individual pages (not just domains) that mention
+// at least one competitor but never the user's brand — the most actionable
+// "ask to be added here" list.
+func printListicleGap(ctx context.Context, st *store.Store, rep sources.Report, brand string, competitors []string, limit int) {
+	var inputs []sources.ScrapedPageInput
+	for _, u := range rep.URLs {
+		page, err := st.GetScrapedPage(ctx, u.URL)
+		if err != nil || page == nil {
+			continue
+		}
+		inputs = append(inputs, sources.ScrapedPageInput{
+			URL: page.URL, Title: page.Title,
+			Description: page.Description, Body: page.Body,
+		})
+	}
+	if len(inputs) == 0 {
+		fmt.Println("Page-level gap: (no scraped pages — run `salience scrape` first)")
+		return
+	}
+	rows := sources.PageGapAnalysis(inputs, brand, competitors)
+	fmt.Printf("Page-level gap — listicles that mention competitors but not %q:\n", brand)
+	if len(rows) == 0 {
+		fmt.Println("  (none — either you appear on every listicle, or no listicles were cited)")
+		return
+	}
+	for i, r := range rows {
+		if limit > 0 && i >= limit {
+			break
+		}
+		fmt.Printf("  · %s\n    %s\n    competitors here: %s\n",
+			clip(r.Title, 70), r.URL, strings.Join(r.MentionsCompetitors, ", "))
+	}
 }
 
 func printDomains(r sources.Report, limit int) {

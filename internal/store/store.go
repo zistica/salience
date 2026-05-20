@@ -121,6 +121,102 @@ CREATE TABLE IF NOT EXISTS explanations (
 CREATE INDEX IF NOT EXISTS idx_explanations_run ON explanations(run_id);
 CREATE INDEX IF NOT EXISTS idx_explanations_brand ON explanations(asked_about_brand);
 
+-- Scraped HTML pages — the actual content the LLM is citing.
+CREATE TABLE IF NOT EXISTS scraped_pages (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	url TEXT NOT NULL UNIQUE,
+	title TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	body TEXT NOT NULL DEFAULT '',
+	status_code INTEGER NOT NULL DEFAULT 0,
+	fetched_at TEXT NOT NULL,
+	err TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_scraped_pages_url ON scraped_pages(url);
+
+-- Suggested additional prompts produced by 'salience expand'.
+CREATE TABLE IF NOT EXISTS prompt_suggestions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	text TEXT NOT NULL,
+	rationale TEXT NOT NULL DEFAULT '',
+	accepted INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL
+);
+
+-- Content briefs produced by 'salience brief'.
+CREATE TABLE IF NOT EXISTS content_briefs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	prompt TEXT NOT NULL,
+	body_markdown TEXT NOT NULL,
+	source_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL
+);
+
+-- User-logged actions (PR campaigns, content publishes, etc.).
+CREATE TABLE IF NOT EXISTS actions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	description TEXT NOT NULL,
+	taken_at TEXT NOT NULL,
+	applies_to_prompts TEXT NOT NULL DEFAULT '[]',
+	notes TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_actions_project ON actions(project_id);
+CREATE INDEX IF NOT EXISTS idx_actions_taken_at ON actions(taken_at);
+
+-- Recurring bench schedules (driven by the server's background ticker).
+CREATE TABLE IF NOT EXISTS schedules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	cron_expr TEXT NOT NULL,
+	last_fired_at TEXT,
+	next_fires_at TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL
+);
+
+-- URL watchers — fetch on a cadence, alert when content changes.
+CREATE TABLE IF NOT EXISTS watchers (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	url TEXT NOT NULL,
+	label TEXT NOT NULL DEFAULT '',
+	interval_seconds INTEGER NOT NULL DEFAULT 86400,
+	last_fetched_at TEXT,
+	last_hash TEXT NOT NULL DEFAULT '',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL
+);
+
+-- One row per watcher fetch — used to render the change history.
+CREATE TABLE IF NOT EXISTS watcher_snapshots (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	watcher_id INTEGER NOT NULL REFERENCES watchers(id) ON DELETE CASCADE,
+	fetched_at TEXT NOT NULL,
+	title TEXT NOT NULL DEFAULT '',
+	body TEXT NOT NULL DEFAULT '',
+	content_hash TEXT NOT NULL,
+	brand_present INTEGER NOT NULL DEFAULT 0,
+	competitors_present INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_watcher_snapshots_watcher ON watcher_snapshots(watcher_id);
+
+-- "Will this draft move the needle?" simulations.
+CREATE TABLE IF NOT EXISTS simulations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	prompt TEXT NOT NULL,
+	content_draft TEXT NOT NULL,
+	baseline_rate REAL NOT NULL DEFAULT 0,
+	simulated_rate REAL NOT NULL DEFAULT 0,
+	delta REAL NOT NULL DEFAULT 0,
+	n_samples INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL
+);
+
 -- "What would I need to do to win this prompt?" responses.
 CREATE TABLE IF NOT EXISTS advice (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

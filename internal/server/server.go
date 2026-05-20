@@ -60,6 +60,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/projects/", s.handleProjectByID)
 	mux.HandleFunc("/api/jobs", s.handleJobsList)
 	mux.HandleFunc("/api/jobs/", s.handleJobsCancel)
+	// v0.2 surfaces — read-only listings of derived data.
+	mux.HandleFunc("/api/scraped", s.handleListScrapedPages)
+	mux.HandleFunc("/api/actions", s.handleListActions)
+	mux.HandleFunc("/api/briefs", s.handleListBriefs)
+	mux.HandleFunc("/api/suggestions", s.handleListSuggestions)
+	mux.HandleFunc("/api/schedules", s.handleListSchedules)
+	mux.HandleFunc("/api/watchers", s.handleListWatchers)
+	mux.HandleFunc("/api/simulations", s.handleListSimulations)
 	mux.Handle("/", s.uiHandler())
 	return mux
 }

@@ -29,6 +29,16 @@ Usage:
   salience playbook [flags]          Combined Markdown doc: sources + explain + advise.
   salience serve   [flags]           Local web dashboard with live updates over SSE.
   salience project SUB [flags]       Manage tracked workspaces (list/show/new/edit/delete/export/import).
+
+The v0.2 optimization layer:
+  salience scrape   [flags]          Fetch every cited URL from a run and persist its HTML content.
+  salience expand   [flags]          Ask an LLM for realistic additional prompts.
+  salience brief    [flags]          Generate a Markdown content brief for one losing prompt.
+  salience action   SUB [flags]      Log operational events for diff attribution.
+  salience schedule SUB [flags]      Recurring benchmarks (server-side ticker).
+  salience watch    SUB [flags]      Track external URLs for content changes.
+  salience simulate [flags]          Test a content draft against a prompt before publishing.
+
   salience version                   Print the version string.
 
 Common flags:
@@ -129,6 +139,41 @@ func main() {
 		}
 	case "project", "projects":
 		if err := cli.RunProject(ctx, args); err != nil {
+			fail(err)
+		}
+	case "scrape":
+		if err := cli.RunScrape(ctx, args); err != nil {
+			fail(err)
+		}
+	case "expand":
+		// `salience expand` runs the expansion. `salience expand list` lists.
+		if len(args) > 0 && args[0] == "list" {
+			if err := cli.RunExpandList(ctx, args[1:]); err != nil {
+				fail(err)
+			}
+		} else {
+			if err := cli.RunExpand(ctx, args); err != nil {
+				fail(err)
+			}
+		}
+	case "brief":
+		if err := cli.RunBrief(ctx, args); err != nil {
+			fail(err)
+		}
+	case "action", "actions":
+		if err := cli.RunAction(ctx, args); err != nil {
+			fail(err)
+		}
+	case "schedule", "schedules":
+		if err := cli.RunSchedule(ctx, args); err != nil {
+			fail(err)
+		}
+	case "watch":
+		if err := cli.RunWatch(ctx, args); err != nil {
+			fail(err)
+		}
+	case "simulate":
+		if err := cli.RunSimulate(ctx, args); err != nil {
 			fail(err)
 		}
 	case "-h", "--help", "help":

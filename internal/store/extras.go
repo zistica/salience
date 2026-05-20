@@ -5,7 +5,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -308,5 +307,3 @@ func nullableTime(t *time.Time) any {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// ensure unused-import check passes when only some helpers fire
-var _ = errors.New

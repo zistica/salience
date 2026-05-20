@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/salience-cli/salience/internal/config"
 	"github.com/salience-cli/salience/internal/cron"
 	"github.com/salience-cli/salience/internal/detect"
 	"github.com/salience-cli/salience/internal/envfile"
@@ -439,7 +440,9 @@ func RunSimulate(ctx context.Context, args []string) error {
 		}
 	}
 
-	brand, _ := loadBrands(proj)
+	// Use the same brand list and the same detector that `salience bench`
+	// uses — otherwise simulator's "did the brand appear?" answer would
+	// disagree with what a real bench would count.
 	primedPrompt := fmt.Sprintf(
 		"Background context (assume this content has been published and is well-indexed on the open web):\n\n---\n%s\n---\n\nQuestion: %s",
 		draft, *promptText)
@@ -448,12 +451,12 @@ func RunSimulate(ctx context.Context, args []string) error {
 	for _, p := range providers {
 		for i := 0; i < *samples; i++ {
 			if base, err := p.Call(ctx, *promptText, cfg.MaxTokens, nil); err == nil {
-				if containsBrand(base.Text, brand) {
+				if detectedUserBrand(base.Text, base.Sources, cfg) {
 					baselineHit++
 				}
 			}
 			if alt, err := p.Call(ctx, primedPrompt, cfg.MaxTokens, nil); err == nil {
-				if containsBrand(alt.Text, brand) {
+				if detectedUserBrand(alt.Text, alt.Sources, cfg) {
 					primedHit++
 				}
 			}
@@ -482,14 +485,19 @@ func RunSimulate(ctx context.Context, args []string) error {
 	return nil
 }
 
-func containsBrand(answer, brand string) bool {
-	if brand == "" {
-		return false
-	}
-	return strings.Contains(strings.ToLower(answer), strings.ToLower(brand))
+// detectedUserBrand runs the same brand-mention pipeline `salience bench`
+// uses so simulator's notion of "the brand was mentioned" matches a real
+// run exactly — full i18n support, alias matching, source-cite detection,
+// the works.
+func detectedUserBrand(answer string, sources []detect.Source, cfg *config.Config) bool {
+	brands := append([]config.Brand{cfg.Brand}, cfg.Competitors...)
+	res := detect.Detect(answer, sources, brands)
+	return res.PerBrand[cfg.Brand.Name]
 }
 
-// loadBrands extracts the brand name + competitor names from a stored project.
+// loadBrands extracts the canonical brand name + competitor names from a
+// stored project for the watcher path (which just needs strings, not the
+// full config).
 func loadBrands(p *store.Project) (string, []string) {
 	if p == nil {
 		return "", nil
@@ -510,5 +518,3 @@ func sha256hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// dummy use of detect to keep the import alive across refactors
-var _ = detect.Source{}

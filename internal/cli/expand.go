@@ -215,25 +215,62 @@ func bulletList(items []string) string {
 	return b.String()
 }
 
-// extractJSONArray finds the first `[…]` JSON array in s. Returns "" if
-// not found.
+// extractJSONArray finds the first balanced `[ ... ]` JSON array in s,
+// handling realistic LLM output: code fences (```json ... ```), prose
+// preamble before the array, and trailing prose after it. String content
+// inside the array — including strings that contain `[` or `]` — is
+// skipped so a quote-embedded bracket doesn't confuse the depth counter.
+//
+// Returns the original input on no-match (callers can choose to surface
+// the raw text in the error path).
 func extractJSONArray(s string) string {
-	start := strings.Index(s, "[")
+	// Strip Markdown code fences if present (```json ... ``` or ``` ... ```).
+	if idx := strings.Index(s, "```"); idx >= 0 {
+		rest := s[idx+3:]
+		// Drop any language tag on the same line.
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[nl+1:]
+		}
+		if end := strings.Index(rest, "```"); end >= 0 {
+			s = rest[:end]
+		} else {
+			s = rest
+		}
+	}
+
+	start := strings.IndexByte(s, '[')
 	if start < 0 {
 		return s
 	}
-	// Find the matching `]` by counting brackets.
 	depth := 0
+	inString := false
+	escape := false
 	for i := start; i < len(s); i++ {
-		switch s[i] {
+		ch := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			switch ch {
+			case '\\':
+				escape = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
 		case '[':
 			depth++
 		case ']':
 			depth--
 			if depth == 0 {
-				return s[start : i+1]
+				return strings.TrimSpace(s[start : i+1])
 			}
 		}
 	}
-	return s[start:]
+	return strings.TrimSpace(s[start:])
 }

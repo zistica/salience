@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -215,11 +214,3 @@ func max1(n int) int {
 	return n
 }
 
-// Used by playbook/dashboard to render an explanation list as a small JSON
-// preview if someone wants it.
-func mustJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
-var _ = mustJSON // suppress unused warning until the renderers use it

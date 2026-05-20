@@ -4,11 +4,9 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/salience-cli/salience/internal/cli"
@@ -184,8 +182,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
 	}
-	_ = flag.Lookup // keeps the flag import alive for the linter if no subcommand parses; harmless
-	_ = filepath.Clean
 }
 
 func fail(err error) {

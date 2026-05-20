@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 
@@ -224,12 +223,3 @@ func RunAdvise(ctx context.Context, args []string) error {
 }
 
 func pctFromFloat(f float64) string { return fmt.Sprintf("%.0f%%", f*100) }
-
-// sortStrings is a tiny helper used by the dashboard to render losing-prompt
-// lists in a stable order.
-func sortStrings(xs []string) []string {
-	sort.Strings(xs)
-	return xs
-}
-
-var _ = sortStrings

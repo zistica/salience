@@ -222,6 +222,7 @@
       case "sources":   return renderSourcesView(main);
       case "playbook":  return renderPlaybookView(main);
       case "trend":     return renderTrendView(main);
+      case "tools":     return renderToolsView(main);
       case "settings":  return renderSettingsView(main);
     }
   }
@@ -679,6 +680,242 @@
     </div>`;
   }
 
+  // ---------- v0.2 tools view ----------
+  // One sub-tab per derived data table so users can see what `scrape`,
+  // `expand`, `brief`, `action`, `schedule`, `watch`, `simulate` produced
+  // without leaving the dashboard.
+
+  let toolsTab = "suggestions";
+
+  async function renderToolsView(main) {
+    if (!state.selectedProject) {
+      main.innerHTML = renderEmpty();
+      return;
+    }
+    const subTabs = [
+      ["suggestions", "Prompt suggestions"],
+      ["actions",     "Actions log"],
+      ["briefs",      "Content briefs"],
+      ["scrapes",     "Scraped pages"],
+      ["schedules",   "Schedules"],
+      ["watchers",    "Watchers"],
+      ["simulations", "Simulations"],
+    ];
+    const tabs = `<div class="tabs">` + subTabs.map(([k, label]) =>
+      `<div class="tab ${toolsTab === k ? "active" : ""}" data-sub="${k}">${escape(label)}</div>`
+    ).join("") + `</div>`;
+    main.innerHTML = `
+      <div class="hero">
+        <div>
+          <h1 class="hero-title">Tools</h1>
+          <p class="hero-sub">
+            Outputs from the diagnose → prescribe → act → verify pipeline.
+            Each tab is a different table — scrape, expand, brief, action,
+            schedule, watch, simulate — populated from your CLI runs.
+          </p>
+        </div>
+      </div>
+      ${tabs}
+      <div id="toolsBody"><div class="loading">Loading…</div></div>
+    `;
+    document.querySelectorAll(".tab[data-sub]").forEach(el =>
+      el.addEventListener("click", () => {
+        toolsTab = el.dataset.sub;
+        renderToolsView(main);
+      }));
+    renderToolsBody();
+  }
+
+  async function renderToolsBody() {
+    const body = $("#toolsBody");
+    if (!body) return;
+    const pid = state.selectedProject.id;
+    try {
+      switch (toolsTab) {
+        case "suggestions":  return renderToolsSuggestions(body, pid);
+        case "actions":      return renderToolsActions(body, pid);
+        case "briefs":       return renderToolsBriefs(body, pid);
+        case "scrapes":      return renderToolsScrapes(body, pid);
+        case "schedules":    return renderToolsSchedules(body, pid);
+        case "watchers":     return renderToolsWatchers(body, pid);
+        case "simulations":  return renderToolsSimulations(body, pid);
+      }
+    } catch (e) {
+      body.innerHTML = `<div class="card"><p class="bad">Failed to load: ${escape(e.message || String(e))}</p></div>`;
+    }
+  }
+
+  // ---- Suggestions (prompt expansion) ----
+
+  async function renderToolsSuggestions(body, pid) {
+    const items = await fetch(`/api/suggestions?project=${pid}`).then(r => r.json());
+    if (!items || items.length === 0) {
+      body.innerHTML = toolsEmpty("No prompt suggestions yet.",
+        "Run <code>salience expand</code> in your terminal to brainstorm new prompts via an LLM.");
+      return;
+    }
+    body.innerHTML = `<div class="help">
+      <b>Staged prompt variations</b> from <code>salience expand</code>. Accept the ones worth adding
+      to this project's prompt list — they only count after acceptance.
+    </div>` + items.map(s => `
+      <div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:14px">
+          <div style="flex:1">
+            <div style="font-weight:500">${escape(s.Text)}</div>
+            ${s.Rationale ? `<div class="muted" style="font-size:12px;margin-top:3px">${escape(s.Rationale)}</div>` : ""}
+          </div>
+          <div>
+            <span class="sent-pill ${s.Accepted ? "positive" : "neutral"}">${s.Accepted ? "accepted" : "pending"}</span>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  // ---- Actions log ----
+
+  async function renderToolsActions(body, pid) {
+    const actions = await fetch(`/api/actions?project=${pid}`).then(r => r.json());
+    if (!actions || actions.length === 0) {
+      body.innerHTML = toolsEmpty("No actions logged.",
+        "Log operational events with <code>salience action add \"…\"</code>. They overlay onto <b>diff</b> output so you can correlate movements with what your team did.");
+      return;
+    }
+    body.innerHTML = `<div class="card no-pad"><table class="prompts">
+      <thead><tr><th>Date</th><th>Description</th><th>Prompts</th><th>Notes</th></tr></thead>
+      <tbody>${actions.map(a => `
+        <tr>
+          <td>${escape(new Date(a.TakenAt).toLocaleDateString())}</td>
+          <td>${escape(a.Description)}</td>
+          <td class="muted">${escape((a.AppliesToPrompts || []).join(", ") || "—")}</td>
+          <td class="muted">${escape(a.Notes || "")}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table></div>`;
+  }
+
+  // ---- Content briefs ----
+
+  async function renderToolsBriefs(body, pid) {
+    const briefs = await fetch(`/api/briefs?project=${pid}`).then(r => r.json());
+    if (!briefs || briefs.length === 0) {
+      body.innerHTML = toolsEmpty("No content briefs yet.",
+        "Generate one with <code>salience brief -prompt \"...\"</code>. Each brief combines scraped competitor content, LLM-stated reasons, and recommended actions into a Markdown action plan.");
+      return;
+    }
+    body.innerHTML = briefs.map(b => `
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-head">
+          <h3>Brief #${b.ID} — ${escape(clip(b.Prompt, 60))}</h3>
+          <span class="card-hint">${escape(new Date(b.CreatedAt).toLocaleString())}</span>
+        </div>
+        <pre style="white-space:pre-wrap;font-size:12.5px;background:var(--bg-2);padding:12px;border-radius:6px;line-height:1.55;font-family:inherit;margin:0">${escape(b.BodyMarkdown)}</pre>
+      </div>
+    `).join("");
+  }
+
+  // ---- Scraped pages ----
+
+  async function renderToolsScrapes(body, pid) {
+    const pages = await fetch(`/api/scraped`).then(r => r.json());
+    if (!pages || pages.length === 0) {
+      body.innerHTML = toolsEmpty("No pages scraped yet.",
+        "Run <code>salience scrape -run N</code> to fetch the content of URLs the LLM cited. The body text is then used by briefs and the page-level gap analysis.");
+      return;
+    }
+    body.innerHTML = `<div class="card no-pad"><table class="prompts">
+      <thead><tr><th>Status</th><th>URL</th><th>Title</th><th>Fetched</th></tr></thead>
+      <tbody>${pages.map(p => {
+        const st = p.Err ? "ERR" : String(p.StatusCode);
+        return `<tr>
+          <td class="num ${p.Err ? "bad" : ""}">${escape(st)}</td>
+          <td class="url" style="font-family:JetBrains Mono;font-size:11.5px">${escape(clip(p.URL, 60))}</td>
+          <td>${escape(clip(p.Title, 50))}</td>
+          <td class="muted">${escape(new Date(p.FetchedAt).toLocaleString())}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+  }
+
+  // ---- Schedules ----
+
+  async function renderToolsSchedules(body, pid) {
+    const scheds = await fetch(`/api/schedules?project=${pid}`).then(r => r.json());
+    if (!scheds || scheds.length === 0) {
+      body.innerHTML = toolsEmpty("No schedules.",
+        "Add a recurring benchmark with <code>salience schedule add -cron \"0 9 * * MON\"</code>. The dashboard server's ticker fires schedules every 30s while <code>salience serve</code> is running.");
+      return;
+    }
+    body.innerHTML = `<div class="card no-pad"><table class="prompts">
+      <thead><tr><th>ID</th><th>Cron</th><th>Enabled</th><th>Next fires</th><th>Last fired</th></tr></thead>
+      <tbody>${scheds.map(s => `
+        <tr>
+          <td class="num">${s.ID}</td>
+          <td><code>${escape(s.CronExpr)}</code></td>
+          <td>${s.Enabled ? `<span class="sent-pill positive">yes</span>` : `<span class="sent-pill neutral">no</span>`}</td>
+          <td class="muted">${escape(new Date(s.NextFires).toLocaleString())}</td>
+          <td class="muted">${s.LastFired ? escape(new Date(s.LastFired).toLocaleString()) : "—"}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table></div>`;
+  }
+
+  // ---- Watchers ----
+
+  async function renderToolsWatchers(body, pid) {
+    const ws = await fetch(`/api/watchers?project=${pid}`).then(r => r.json());
+    if (!ws || ws.length === 0) {
+      body.innerHTML = toolsEmpty("No watchers.",
+        "Track an external URL with <code>salience watch add -url …</code>. The server refetches each watcher on its interval and flags content changes.");
+      return;
+    }
+    body.innerHTML = `<div class="card no-pad"><table class="prompts">
+      <thead><tr><th>ID</th><th>Label</th><th>URL</th><th>Interval</th><th>Last fetched</th></tr></thead>
+      <tbody>${ws.map(w => `
+        <tr>
+          <td class="num">${w.ID}</td>
+          <td>${escape(w.Label || "—")}</td>
+          <td class="url" style="font-family:JetBrains Mono;font-size:11.5px">${escape(clip(w.URL, 50))}</td>
+          <td class="muted">${Math.round(w.IntervalSeconds / 60)} min</td>
+          <td class="muted">${w.LastFetchedAt ? escape(new Date(w.LastFetchedAt).toLocaleString()) : "—"}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table></div>`;
+  }
+
+  // ---- Simulations ----
+
+  async function renderToolsSimulations(body, pid) {
+    const sims = await fetch(`/api/simulations?project=${pid}`).then(r => r.json());
+    if (!sims || sims.length === 0) {
+      body.innerHTML = toolsEmpty("No simulations yet.",
+        "Test a content draft against a prompt with <code>salience simulate -prompt \"…\" -content draft.md</code>. The result is the predicted mention-rate change if that content shipped.");
+      return;
+    }
+    body.innerHTML = `<div class="card no-pad"><table class="prompts">
+      <thead><tr><th>ID</th><th>Prompt</th><th>Baseline</th><th>Simulated</th><th>Δ</th><th>n</th><th>When</th></tr></thead>
+      <tbody>${sims.map(s => {
+        const sgn = s.Delta > 0.005 ? "good" : s.Delta < -0.005 ? "bad" : "";
+        return `<tr>
+          <td class="num">${s.ID}</td>
+          <td>${escape(clip(s.Prompt, 60))}</td>
+          <td class="num">${pct(s.BaselineRate)}</td>
+          <td class="num">${pct(s.SimulatedRate)}</td>
+          <td class="num ${sgn}">${signedPct(s.Delta)}</td>
+          <td class="num muted">${s.NSamples}</td>
+          <td class="muted">${escape(new Date(s.CreatedAt).toLocaleString())}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+  }
+
+  function toolsEmpty(title, hint) {
+    return `<div class="card">
+      <div class="card-head"><h3>${escape(title)}</h3></div>
+      <div class="muted" style="font-size:13px;line-height:1.55">${hint}</div>
+    </div>`;
+  }
+
   // ---------- project picker ----------
   function renderProjectPicker() {
     const name = $("#projectName");
@@ -1113,12 +1350,12 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
     if (ev.metaKey || ev.ctrlKey) return;
-    const tabs = ["dashboard", "mentions", "sources", "playbook", "trend", "settings"];
+    const tabs = ["dashboard", "mentions", "sources", "playbook", "trend", "tools", "settings"];
     const idx = state.selectedRun ? state.runs.findIndex(r => r.id === state.selectedRun.id) : -1;
     if (ev.key === "j" && idx >= 0 && idx < state.runs.length - 1) selectRun(state.runs[idx + 1].id);
     if (ev.key === "k" && idx > 0) selectRun(state.runs[idx - 1].id);
     if (ev.key === "t") { toggleTheme(); return; }
-    if (["1", "2", "3", "4", "5", "6"].includes(ev.key)) {
+    if (["1", "2", "3", "4", "5", "6", "7"].includes(ev.key)) {
       const t = tabs[Number(ev.key) - 1];
       if (t) switchView(t);
     }

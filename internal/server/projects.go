@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/salience-cli/salience/internal/config"
-	"github.com/salience-cli/salience/internal/detect"
 	"github.com/salience-cli/salience/internal/pricing"
 	"github.com/salience-cli/salience/internal/provider"
 	"github.com/salience-cli/salience/internal/runner"
@@ -682,17 +681,13 @@ func (p *progressBuf) Write(b []byte) (int, error) {
 		p.jm.Update(p.job.ID, p.done, p.total, strings.TrimSpace(s))
 		return len(b), nil
 	}
-	if i := strings.Index(s, "[/"); i >= 0 {
-		_ = i
-	}
-	// Light parser: look for "[N/M]" pattern.
+	// Light parser: look for "[N/M]" pattern in the runner's progress line.
 	if open := strings.Index(s, "["); open >= 0 {
 		slash := strings.Index(s[open:], "/")
 		end := strings.Index(s[open:], "]")
 		if slash > 0 && end > slash {
 			n, errN := strconv.Atoi(strings.TrimSpace(s[open+1 : open+slash]))
 			m, errM := strconv.Atoi(strings.TrimSpace(s[open+slash+1 : open+end]))
-			_ = detect.Source{} // keep detect import live across refactors
 			if errN == nil && errM == nil {
 				p.done = n
 				p.total = m

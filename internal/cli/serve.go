@@ -36,6 +36,8 @@ func RunServe(ctx context.Context, args []string) error {
 
 	addr := *bind + ":" + strconv.Itoa(*port)
 	srv := server.New(st, *dbPath)
+	// Start the background ticker so schedules + watchers actually fire.
+	srv.StartBackground(ctx)
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           srv.Handler(),

@@ -45,6 +45,9 @@ func (s *Server) tickerLoop(ctx context.Context) {
 func (s *Server) tickOnce(ctx context.Context) {
 	s.fireDueSchedules(ctx)
 	s.fetchDueWatchers(ctx)
+	// v0.4: profile cited URLs from recent runs so the Anatomy view has
+	// data to show. Idempotent + TTL-cached, see profile_worker.go.
+	s.runProfileWorker(ctx)
 }
 
 // ---------- schedules ----------

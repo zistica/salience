@@ -41,6 +41,12 @@ func Open(path string) (*Store, error) {
 // Close releases the underlying database connection.
 func (s *Store) Close() error { return s.db.Close() }
 
+// DB returns the underlying *sql.DB. Use sparingly — most callers
+// should add a typed helper method instead. Exists for one-off queries
+// (e.g. fetching a single sample by id) where a dedicated wrapper
+// would be more noise than signal.
+func (s *Store) DB() *sql.DB { return s.db }
+
 const schema = `
 -- A project is a brand-tracking workspace. Each project carries its full
 -- config inline so the UI can edit it without touching files on disk.
@@ -236,6 +242,35 @@ CREATE TABLE IF NOT EXISTS advice (
 );
 CREATE INDEX IF NOT EXISTS idx_advice_run ON advice(run_id);
 CREATE INDEX IF NOT EXISTS idx_advice_prompt ON advice(prompt);
+
+-- v0.4 "Answer Anatomy" — per-cited-URL deep profile.
+-- One row per URL, refreshed on a TTL. brand_hits_json is a map of
+-- brand-canonical-name -> { count, sentiment_pos, sentiment_neu,
+-- sentiment_neg, snippets[] } describing what the page actually says
+-- about each tracked brand. The other columns are page-authority
+-- signals the LLM (probably) used to decide whether to cite this page.
+CREATE TABLE IF NOT EXISTS source_profiles (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	url TEXT NOT NULL UNIQUE,
+	domain TEXT NOT NULL,
+	fetched_at TEXT NOT NULL,
+	status_code INTEGER NOT NULL DEFAULT 0,
+	html_lang TEXT NOT NULL DEFAULT '',
+	title TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	word_count INTEGER NOT NULL DEFAULT 0,
+	has_schema_product INTEGER NOT NULL DEFAULT 0,
+	has_schema_review INTEGER NOT NULL DEFAULT 0,
+	has_schema_article INTEGER NOT NULL DEFAULT 0,
+	has_schema_org INTEGER NOT NULL DEFAULT 0,
+	last_modified TEXT NOT NULL DEFAULT '',
+	authority_score INTEGER NOT NULL DEFAULT 0, -- 0..100 composite proxy
+	page_kind TEXT NOT NULL DEFAULT '',         -- "review_aggregator" | "brand_own" | "encyclopedia" | "listicle" | "news" | "other"
+	brand_hits_json TEXT NOT NULL DEFAULT '{}',
+	err TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_source_profiles_url ON source_profiles(url);
+CREATE INDEX IF NOT EXISTS idx_source_profiles_domain ON source_profiles(domain);
 `
 
 func (s *Store) migrate() error {
@@ -253,6 +288,10 @@ func (s *Store) migrate() error {
 		// region-aware bench (v0.3): existing samples become "global".
 		`ALTER TABLE samples ADD COLUMN region TEXT NOT NULL DEFAULT 'global'`,
 		`ALTER TABLE projects ADD COLUMN regions_json TEXT NOT NULL DEFAULT '[]'`,
+		// v0.4 "Anatomy" — capture the tool calls (web_search queries etc.)
+		// the LLM emitted while answering. Stored as JSON; provider-side
+		// format is normalised to [{ kind, query, result_count }].
+		`ALTER TABLE samples ADD COLUMN tool_calls_json TEXT NOT NULL DEFAULT '[]'`,
 	} {
 		if _, err := s.db.Exec(alter); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
@@ -304,6 +343,7 @@ type SampleRecord struct {
 	Region       string // e.g. "global", "jp", "us"; defaults to "global"
 	ResponseText string
 	Sources      any // serialized as JSON
+	ToolCalls    any // serialized as JSON; [] when provider doesn't expose any
 	InputTokens  int
 	OutputTokens int
 	CostUSD      float64
@@ -328,6 +368,13 @@ func (s *Store) SaveSample(ctx context.Context, sr SampleRecord, mentions []Ment
 	if err != nil {
 		return err
 	}
+	toolJSON := []byte("[]")
+	if sr.ToolCalls != nil {
+		toolJSON, err = json.Marshal(sr.ToolCalls)
+		if err != nil {
+			return err
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -340,11 +387,11 @@ func (s *Store) SaveSample(ctx context.Context, sr SampleRecord, mentions []Ment
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO samples(run_id, prompt, provider_name, provider_kind, model, sample_idx, region, created_at,
-			response_text, sources_json, input_tokens, output_tokens, cost_usd, error)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			response_text, sources_json, tool_calls_json, input_tokens, output_tokens, cost_usd, error)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sr.RunID, sr.Prompt, sr.ProviderName, sr.ProviderKind, sr.Model, sr.SampleIdx, region,
 		time.Now().UTC().Format(time.RFC3339Nano),
-		sr.ResponseText, string(srcJSON), sr.InputTokens, sr.OutputTokens, sr.CostUSD, sr.Error,
+		sr.ResponseText, string(srcJSON), string(toolJSON), sr.InputTokens, sr.OutputTokens, sr.CostUSD, sr.Error,
 	)
 	if err != nil {
 		if isUnique(err) {

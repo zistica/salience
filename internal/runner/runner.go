@@ -179,6 +179,23 @@ func (r *Runner) Run(ctx context.Context, resumeRunID int64) (int64, error) {
 					} else {
 						rec.ResponseText = resp.Text
 						rec.Sources = resp.Sources
+						// Persist whatever tool calls the provider exposed.
+						// When none were captured but we DID get cited URLs,
+						// synthesise a single "inferred web_search" entry —
+						// chat-completions APIs typically hide the actual
+						// search queries even when search ran, so the citation
+						// count is our best evidence the search happened.
+						if len(resp.ToolCalls) > 0 {
+							rec.ToolCalls = resp.ToolCalls
+						} else if len(resp.Sources) > 0 {
+							rec.ToolCalls = []provider.ToolCall{{
+								Kind:        "web_search",
+								Query:       "(inferred — provider did not expose the search query)",
+								ResultCount: len(resp.Sources),
+							}}
+						} else {
+							rec.ToolCalls = []provider.ToolCall{}
+						}
 						rec.InputTokens = resp.InputTokens
 						rec.OutputTokens = resp.OutputTokens
 						rec.CostUSD = pricing.Estimate(p.Model(), resp.InputTokens, resp.OutputTokens)

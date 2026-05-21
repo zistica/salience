@@ -83,6 +83,10 @@ type Cell struct {
 	SentimentByBrand map[string]int
 	// Gap is the user brand rate minus the best competitor rate.
 	Gap float64
+	// SampleIDs is the list of underlying sample DB ids that fed this
+	// cell. Used by the dashboard's "Open anatomy" button — clicking a
+	// row loads /api/runs/:id/anatomy/:sampleId for the first one.
+	SampleIDs []int64
 }
 
 // BrandTotals is the overall mention rate per brand across the whole run.
@@ -140,6 +144,7 @@ func BuildWithBrands(runID int64, runMeta *store.Run, samples []store.SampleRow,
 		samples  int
 		failures int
 		hits     map[string]int
+		ids      []int64
 	}
 	buckets := map[key]*bucket{}
 	totalHits := map[string]int{}
@@ -165,6 +170,7 @@ func BuildWithBrands(runID int64, runMeta *store.Run, samples []store.SampleRow,
 			continue
 		}
 		b.samples++
+		b.ids = append(b.ids, s.ID)
 		totalSamples++
 		hit := map[string]bool{}
 		for _, br := range s.BrandsHit {
@@ -190,6 +196,7 @@ func BuildWithBrands(runID int64, runMeta *store.Run, samples []store.SampleRow,
 			CILow:            map[string]float64{},
 			CIHigh:           map[string]float64{},
 			SentimentByBrand: map[string]int{},
+			SampleIDs:        append([]int64(nil), b.ids...),
 		}
 		for _, br := range allBrands {
 			c.Rates[br] = rate(b.hits[br], b.samples)

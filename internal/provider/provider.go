@@ -9,10 +9,25 @@ import (
 	"github.com/salience-cli/salience/internal/detect"
 )
 
+// ToolCall is one provider-side tool invocation the LLM made while
+// answering — typically a web_search query. We normalise across vendors
+// (OpenAI Responses, Anthropic server_tool_use, Perplexity citations)
+// to make the dashboard's "Anatomy" view vendor-agnostic.
+//
+// Kind is "web_search" for the most common case. Query is the actual
+// search string the LLM emitted. ResultCount is how many results that
+// tool call returned (0 if the API doesn't expose it).
+type ToolCall struct {
+	Kind        string `json:"kind"`
+	Query       string `json:"query,omitempty"`
+	ResultCount int    `json:"result_count,omitempty"`
+}
+
 // Response is the normalized output of one LLM call.
 type Response struct {
 	Text         string
 	Sources      []detect.Source
+	ToolCalls    []ToolCall
 	InputTokens  int
 	OutputTokens int
 	RawJSON      string

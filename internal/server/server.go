@@ -207,15 +207,28 @@ func (s *Server) handleRunNested(w http.ResponseWriter, r *http.Request) {
 		s.serveRunReport(w, ctx, id)
 		return
 	}
-	switch parts[1] {
-	case "mentions":
+	switch {
+	case parts[1] == "mentions":
 		s.serveRunMentions(w, ctx, id)
-	case "sources":
+	case parts[1] == "sources":
 		s.serveRunSources(w, ctx, id)
-	case "explanations":
+	case parts[1] == "explanations":
 		s.serveRunExplanations(w, ctx, id)
-	case "advice":
+	case parts[1] == "advice":
 		s.serveRunAdvice(w, ctx, id)
+	case parts[1] == "domains":
+		// v0.4: "Domain Hit List" — for this run, which domains the LLMs
+		// cite most, who's on them, who isn't.
+		s.serveRunDomains(w, ctx, id)
+	case strings.HasPrefix(parts[1], "anatomy/"):
+		// v0.4: per-sample anatomy. URL is /api/runs/:id/anatomy/:sampleId.
+		sub := strings.TrimPrefix(parts[1], "anatomy/")
+		sampleID, perr := strconv.ParseInt(sub, 10, 64)
+		if perr != nil {
+			http.Error(w, "bad sample id", 400)
+			return
+		}
+		s.serveSampleAnatomy(w, ctx, id, sampleID)
 	default:
 		http.NotFound(w, r)
 	}
